@@ -34,6 +34,7 @@ def send_email(
     text_body: str,
     html_body: str = "",
     use_tls: bool = True,
+    reply_to: str = "",
 ) -> Tuple[bool, str]:
     """发送一封邮件。成功返回 (True, '')，失败 (False, error)。"""
     host = (host or "").strip()
@@ -41,6 +42,7 @@ def send_email(
     password = (password or "").strip()
     mail_from = (mail_from or user or "").strip()
     to_addr = (to_addr or "").strip().lower()
+    reply_to = (reply_to or "").strip()
     if not smtp_configured(host=host, user=user, password=password):
         return False, "smtp_not_configured"
     if not to_addr or "@" not in to_addr:
@@ -50,6 +52,8 @@ def send_email(
         msg["Subject"] = subject
         msg["From"] = mail_from
         msg["To"] = to_addr
+        if reply_to:
+            msg["Reply-To"] = reply_to
         msg.attach(MIMEText(text_body or "", "plain", "utf-8"))
         if html_body:
             msg.attach(MIMEText(html_body, "html", "utf-8"))

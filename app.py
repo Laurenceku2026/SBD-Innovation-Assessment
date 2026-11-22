@@ -1,6 +1,7 @@
 """Stanley Black & Decker Innovation Assessment — independent Streamlit app."""
 from __future__ import annotations
 
+import html
 import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
@@ -95,13 +96,13 @@ def t() -> dict:
             "mail_admin_ok": "已邮件通知管理员。",
             "mail_admin_fail": "申请已提交，但未能通知管理员：",
             "mail_no_admin": "请先在管理员后台填写管理员邮箱，并配置 SMTP。",
-            "mail_user_ok": "已邮件通知用户登录密码。",
-            "mail_user_fail": "账号已开通，但发信失败：",
+            "mail_user_ok": "已开通。请到管理员邮箱，用登记邮箱把登录密码回复给用户。",
+            "mail_user_fail": "账号已开通，但给管理员的草稿邮件发送失败：",
             "smtp_missing": "邮件未配置。请在 Streamlit Secrets 填写与 TechLife 相同的 SMTP_HOST / SMTP_USER / SMTP_PASSWORD / SMTP_FROM。",
             "link_invalid": "审核链接无效或已过期。",
             "already_approved": "该申请已经开通。",
-            "approved_mail_ok": "已开通，登录密码已发到用户邮箱。",
-            "approved_mail_fail": "已开通，但给用户发信失败：",
+            "approved_mail_ok": "已开通。登录密码草稿已发到管理员邮箱，请用您的登记邮箱回复用户。",
+            "approved_mail_fail": "已开通，但给管理员的草稿邮件发送失败：",
             "rejected_ok": "已拒绝该申请。",
         }
     return {
@@ -152,13 +153,13 @@ def t() -> dict:
         "mail_admin_ok": "Admins have been emailed.",
         "mail_admin_fail": "Application saved, but the admin email failed: ",
         "mail_no_admin": "Set admin emails in the admin panel and configure SMTP.",
-        "mail_user_ok": "The user was emailed their login password.",
-        "mail_user_fail": "Account approved, but the email failed: ",
+        "mail_user_ok": "Approved. Check the admin inbox and reply to the user from your registered email.",
+        "mail_user_fail": "Approved, but the draft email to admin failed: ",
         "smtp_missing": "Email is not configured. In Streamlit Secrets set the same SMTP_HOST / SMTP_USER / SMTP_PASSWORD / SMTP_FROM as TechLife.",
         "link_invalid": "This review link is invalid or expired.",
         "already_approved": "This request was already approved.",
-        "approved_mail_ok": "Approved. The login password was emailed to the user.",
-        "approved_mail_fail": "Approved, but the user email failed: ",
+        "approved_mail_ok": "Approved. A password draft was emailed to the admin; please reply to the user from your registered mailbox.",
+        "approved_mail_fail": "Approved, but the draft email to admin failed: ",
         "rejected_ok": "This request was rejected.",
     }
 
@@ -313,7 +314,11 @@ def smtp_ready() -> bool:
 
 
 def _send_mail(
-    to_addr: str, subject: str, text_body: str, html_body: str = ""
+    to_addr: str,
+    subject: str,
+    text_body: str,
+    html_body: str = "",
+    reply_to: str = "",
 ) -> tuple[bool, str]:
     cfg = smtp_settings()
     if not smtp_configured(host=cfg["host"], user=cfg["user"], password=cfg["password"]):
@@ -329,6 +334,7 @@ def _send_mail(
         text_body=text_body,
         html_body=html_body,
         use_tls=cfg["use_tls"],
+        reply_to=reply_to,
     )
 
 
@@ -404,8 +410,8 @@ def notify_admins_of_request(email: str, message: str, request_id: str) -> tuple
         f"Email: {email}\n"
         f"Note: {message or '-'}\n\n"
         f"{link_text}"
-        "Clicking Approve will email the user their login password.\n"
-        "点击 Approve 后，系统会自动给用户发送登录密码。"
+        "Clicking Approve will email YOU a draft (user email + password) to forward from your registered mailbox.\n"
+        "点击 Approve 后，系统会把用户邮箱和密码草稿发到您的登记邮箱，请用该邮箱回复用户。"
     )
     errors = []
     sent = 0
@@ -420,23 +426,62 @@ def notify_admins_of_request(email: str, message: str, request_id: str) -> tuple
     return False, "; ".join(errors) or "send_failed"
 
 
-def notify_user_approved(email: str) -> tuple[bool, str]:
-    if not smtp_ready():
-        return False, "smtp_not_configured"
-    password = sbd_db.DEFAULT_PASSWORD
+def user_access_draft(email: str) -> tuple[str, str]:
+    """Ready-to-send message for the admin to reply to the applicant."""
     login_url = app_base_url()
     subject = "Innovation Assessment 账号已开通 / access approved"
-    extra = f"\nSign in: {login_url}\n登录地址: {login_url}\n" if login_url else ""
     body = (
-        "Your Innovation Assessment account is approved.\n"
-        "您的 Innovation Assessment 账号已开通。\n\n"
-        f"Email / 登录邮箱: {email}\n"
-        f"Password / 登录密码: {password}\n"
-        f"{extra}\n"
-        "Please sign in and change your password.\n"
-        "请登录后立即修改密码。"
+        "您好 / Hello,\n\n"
+        "您的 Innovation Assessment 账号已开通。\n"
+        "Your Innovation Assessment account is approved.\n\n"
+        f"登录邮箱 / Email: {email}\n"
+        f"登录密码 / Password: {sbd_db.DEFAULT_PASSWORD}\n"
+        f"登录地址 / Sign in: {login_url}\n\n"
+        "请登录后立即修改密码。\n"
+        "Please change your password after you sign in."
     )
-    return _send_mail(email, subject, body)
+    return subject, body
+
+
+def notify_user_approved(email: str) -> tuple[bool, str]:
+    """Cannot send as the SBD admin mailbox via Gmail SMTP. Email a draft to admins instead."""
+    admins = sbd_db.get_admin_emails()
+    if not admins:
+        return False, "no_admin_email"
+    if not smtp_ready():
+        return False, "smtp_not_configured"
+    email = sbd_db.normalize_email(email)
+    draft_subject, draft_body = user_access_draft(email)
+    subject = f"请回复用户开通账号 / Please reply to {email}"
+    body = (
+        "TechLife Gmail cannot send as your registered admin email.\n"
+        "系统无法用您的登记邮箱直接发信。请用您的登记邮箱把下面内容发给用户"
+        "（在本邮件点「回复」即可发给该用户）。\n\n"
+        f"收件人 / To: {email}\n"
+        f"主题 / Subject: {draft_subject}\n\n"
+        "---------- 请复制或直接回复 ----------\n"
+        f"{draft_body}\n"
+        "------------------------------------"
+    )
+    html_body = (
+        f"<p>请用您的登记邮箱把登录信息发给用户 <b>{email}</b>。"
+        "本邮件已设置 Reply-To 为该用户，点回复即可。</p>"
+        f"<p>To: {email}<br>Subject: {draft_subject}</p>"
+        f"<pre>{html.escape(draft_body)}</pre>"
+    )
+    errors = []
+    sent = 0
+    for to_addr in admins:
+        ok, err = _send_mail(
+            to_addr, subject, body, html_body=html_body, reply_to=email
+        )
+        if ok:
+            sent += 1
+        else:
+            errors.append(f"{to_addr}: {err}")
+    if sent:
+        return True, ""
+    return False, "; ".join(errors) or "send_failed"
 
 
 def consume_review_link() -> bool:
@@ -482,6 +527,9 @@ def consume_review_link() -> bool:
         st.success(labels["approved_mail_ok"] + f" ({email})")
     else:
         st.error(labels["approved_mail_fail"] + str(err))
+    _subj, draft = user_access_draft(email)
+    st.caption("下面是发给用户的草稿 / Draft for the user:")
+    st.code(draft, language=None)
     return True
 
 
