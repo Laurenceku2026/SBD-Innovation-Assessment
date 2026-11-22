@@ -200,7 +200,7 @@ def last_logins_map(n: int = 5) -> dict[str, list[str]]:
     return grouped
 
 
-def create_access_request(email: str, message: str = "") -> None:
+def create_access_request(email: str, message: str = "") -> str:
     client = get_client()
     if not client:
         raise RuntimeError(
@@ -209,9 +209,32 @@ def create_access_request(email: str, message: str = "") -> None:
             "(same values as TechLife), or SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
         )
     email = normalize_email(email)
-    client.table("sbd_access_requests").insert(
+    res = client.table("sbd_access_requests").insert(
         {"email": email, "message": (message or "").strip(), "status": "pending"}
     ).execute()
+    rows = res.data or []
+    if rows and rows[0].get("id"):
+        return str(rows[0]["id"])
+    fallback = (
+        client.table("sbd_access_requests")
+        .select("id")
+        .eq("email", email)
+        .eq("status", "pending")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    found = fallback.data or []
+    return str(found[0]["id"]) if found and found[0].get("id") else ""
+
+
+def get_request(request_id: str) -> Optional[dict[str, Any]]:
+    client = get_client()
+    if not client or not request_id:
+        return None
+    res = client.table("sbd_access_requests").select("*").eq("id", request_id).limit(1).execute()
+    rows = res.data or []
+    return rows[0] if rows else None
 
 
 def list_pending_requests() -> list[dict[str, Any]]:
