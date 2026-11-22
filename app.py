@@ -5,6 +5,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import jwt
+import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -76,6 +77,9 @@ def t() -> dict:
             "save": "保存",
             "logout": "退出管理员",
             "last5": "最近 5 次登录",
+            "col_email": "用户名字（Email）",
+            "col_created": "用户建立时间",
+            "col_login": "最近登录",
             "none": "无",
             "org_logo": "企业 Logo",
             "upload_logo": "上传 Logo（PNG/JPG/WebP，不超过 500KB）",
@@ -125,6 +129,9 @@ def t() -> dict:
         "save": "Save",
         "logout": "Leave admin",
         "last5": "Last 5 logins",
+        "col_email": "User name (Email)",
+        "col_created": "Created at",
+        "col_login": "Last login",
         "none": "None",
         "org_logo": "Organization Logo",
         "upload_logo": "Upload logo (PNG/JPG/WebP, max 500KB)",
@@ -526,17 +533,32 @@ def render_admin_panel() -> None:
     users = sbd_db.list_users()
     if not users:
         st.caption(labels["none"])
-    for user in users:
-        email = user.get("email") or ""
-        logins = sbd_db.last_logins(email, 5)
-        c1, c2 = st.columns([6, 1])
-        with c1:
-            st.markdown(f"**{email}** · {user.get('status')}")
-            st.caption(f"{labels['last5']}: {', '.join(logins) if logins else labels['none']}")
-        with c2:
-            if st.button(labels["delete"], key=f"del_{email}"):
-                sbd_db.delete_user(email)
-                st.rerun()
+    else:
+        login_map = sbd_db.last_logins_map(5)
+        rows = []
+        for user in users:
+            email = user.get("email") or ""
+            logins = (login_map.get(sbd_db.normalize_email(email)) or []) + [""] * 5
+            rows.append(
+                {
+                    labels["col_email"]: email,
+                    labels["col_created"]: sbd_db.format_ts(user.get("created_at")),
+                    f"{labels['col_login']} 1": logins[0],
+                    f"{labels['col_login']} 2": logins[1],
+                    f"{labels['col_login']} 3": logins[2],
+                    f"{labels['col_login']} 4": logins[3],
+                    f"{labels['col_login']} 5": logins[4],
+                }
+            )
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        del_email = st.selectbox(
+            labels["delete"],
+            options=[""] + [u.get("email") or "" for u in users],
+            key="sbd_delete_user",
+        )
+        if del_email and st.button(labels["delete"], key="sbd_delete_user_btn"):
+            sbd_db.delete_user(del_email)
+            st.rerun()
 
 
 def render_user_gate() -> None:

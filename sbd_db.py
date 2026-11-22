@@ -149,6 +149,17 @@ def record_login(email: str) -> None:
     client.table("sbd_login_events").insert({"email": email}).execute()
 
 
+def format_ts(value: Any) -> str:
+    if not value:
+        return ""
+    text = str(value).replace("T", " ").replace("Z", "")
+    if "." in text:
+        text = text.split(".", 1)[0]
+    if "+" in text[10:]:
+        text = text.split("+", 1)[0]
+    return text.strip()[:19]
+
+
 def last_logins(email: str, n: int = 5) -> list[str]:
     client = get_client()
     if not client:
@@ -162,11 +173,31 @@ def last_logins(email: str, n: int = 5) -> list[str]:
         .limit(n)
         .execute()
     )
-    out = []
+    return [format_ts(row.get("logged_at")) for row in (res.data or []) if format_ts(row.get("logged_at"))]
+
+
+def last_logins_map(n: int = 5) -> dict[str, list[str]]:
+    client = get_client()
+    if not client:
+        return {}
+    res = (
+        client.table("sbd_login_events")
+        .select("email,logged_at")
+        .order("logged_at", desc=True)
+        .execute()
+    )
+    grouped: dict[str, list[str]] = {}
     for row in res.data or []:
-        ts = row.get("logged_at") or ""
-        out.append(str(ts).replace("T", " ")[:19])
-    return out
+        email = normalize_email(str(row.get("email") or ""))
+        if not email:
+            continue
+        times = grouped.setdefault(email, [])
+        if len(times) >= n:
+            continue
+        stamp = format_ts(row.get("logged_at"))
+        if stamp:
+            times.append(stamp)
+    return grouped
 
 
 def create_access_request(email: str, message: str = "") -> None:
