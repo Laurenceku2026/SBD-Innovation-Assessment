@@ -522,7 +522,7 @@ TEXTS = {
 - **S 严重度分（1–10）**：看这 n 条里后果有多糟（安全/退货/不可用→高；轻微抱怨→低）。没有后果用语 → 未知。
 - **U 未满足分（1–10）**：这 n 条里有多少在说现有产品/竞品没解决。u=未解决条数/n，**U = min(10, max(1, round(10×u)))**。看不出 → 未知。
 - **W 付费意愿分（1–10）**：只看是否出现愿加价、会买、换品、嫌贵但仍要解决。完全没有价格/购买用语 → 未知。
-- 任一维未知则 **P 不可计算**。机会表：Top N + 所有 **P ≥ 阈值**（默认 6.0）。未印证的假设不得抬分。
+- 任一维未知则 **P 不可计算**。机会表：Top N + 所有 **P ≥ 阈值**（默认 1.0）。未印证的假设不得抬分。
 - Desirability D：已验证痛点的 P 与证据等级
 - Viability **V = 0.4×W + 0.3×渠道可达 + 0.3×单位经济**
 - Feasibility **T = 0.4×技术就绪 + 0.3×IP空白 + 0.3×相对竞品可差异化**
@@ -577,7 +577,7 @@ TEXTS = {
         "voc_preview": "已识别粘贴 {n} 条，渠道分布：{channels}",
         "web_search_label": "按目标市场做中文+英文网页检索（YouTuber / 测评 / 评论）",
         "pain_threshold_label": "痛点纳入阈值 P（1–10）",
-        "pain_threshold_help": "P=0.3×频次+0.3×严重度+0.2×未满足+0.2×付费意愿。第7部分先出 Top N；凡 P≥阈值的机会全部列入，所以可以多于 N 条。建议默认 6.0。",
+        "pain_threshold_help": "P=0.3×频次+0.3×严重度+0.2×未满足+0.2×付费意愿。第7部分先出 Top N；凡 P≥阈值的机会全部列入，所以可以多于 N 条。默认 1.0。",
         "top_n_label": "至少输出机会数（Top N）",
         "submit_btn": "🚀 开始创新分析",
         "product_name_missing": "请填写产品名称",
@@ -621,7 +621,7 @@ TEXTS = {
 - **S severity (1–10)**: how bad the consequence is in those n snippets (safety/returns/unusable high; mild gripe low). No consequence language → unknown.
 - **U unmet (1–10)**: share of the n snippets saying current/competitor products fail. u = unsolved/n, **U = min(10, max(1, round(10×u)))**. Cannot tell → unknown.
 - **W WTP (1–10)**: only if text shows pay-more / would-buy / switch / too-expensive-but-need-it. No price or purchase language → unknown.
-- If any factor is unknown, **P is not computable**. Opportunity table: Top N + every **P ≥ threshold** (default 6.0). Unsupported hypotheses must not raise scores.
+- If any factor is unknown, **P is not computable**. Opportunity table: Top N + every **P ≥ threshold** (default 1.0). Unsupported hypotheses must not raise scores.
 - Desirability D: P and evidence grade of *verified* pains
 - Viability **V = 0.4×W + 0.3×reach/channel + 0.3×unit economics**
 - Feasibility **T = 0.4×tech readiness + 0.3×IP white space + 0.3×differentiability vs competitors**
@@ -676,7 +676,7 @@ TEXTS = {
         "voc_preview": "Recognized {n} pasted items, by channel: {channels}",
         "web_search_label": "Run Chinese+English web search per market (YouTubers / reviews / comments)",
         "pain_threshold_label": "Pain inclusion threshold P (1–10)",
-        "pain_threshold_help": "P=0.3×frequency+0.3×severity+0.2×unmet+0.2×WTP. Part 7 always lists Top N, then adds every opportunity with P≥threshold (so it can exceed N). Default 6.0.",
+        "pain_threshold_help": "P=0.3×frequency+0.3×severity+0.2×unmet+0.2×WTP. Part 7 always lists Top N, then adds every opportunity with P≥threshold (so it can exceed N). Default 1.0.",
         "top_n_label": "Minimum opportunities (Top N)",
         "submit_btn": "🚀 Start innovation analysis",
         "product_name_missing": "Please enter the product name",
@@ -1199,7 +1199,7 @@ def render_innovation_app(*, embedded: bool = False) -> None:
             t["pain_threshold_label"],
             min_value=1.0,
             max_value=10.0,
-            value=6.0,
+            value=1.0,
             step=0.5,
             key="inn_pain_threshold",
             label_visibility="collapsed",
