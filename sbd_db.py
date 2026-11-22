@@ -14,22 +14,32 @@ DEFAULT_PASSWORD = "1234567"
 PBKDF2_ROUNDS = 120_000
 
 
-def _secret(name: str, default: str = "") -> str:
-    try:
-        val = st.secrets.get(name)
-        if val is not None and str(val).strip():
-            return str(val).strip()
-    except Exception:
-        pass
-    return str(default or os.environ.get(name, "")).strip()
+def _secret(*names: str, default: str = "") -> str:
+    for name in names:
+        try:
+            val = st.secrets.get(name)
+            if val is not None and str(val).strip():
+                return str(val).strip()
+        except Exception:
+            pass
+        env = os.environ.get(name, "")
+        if env and str(env).strip():
+            return str(env).strip()
+    return str(default or "").strip()
 
 
 def get_client() -> Optional[Client]:
-    url = _secret("SUPABASE_URL")
-    key = _secret("SUPABASE_SERVICE_ROLE_KEY") or _secret("SUPABASE_ANON_KEY")
+    # Same aliases as TechLife / Innovation Analysis Cloud secrets.
+    url = _secret("SUPABASE_STOCK_URL", "SUPABASE_URL")
+    key = _secret(
+        "SUPABASE_STOCK_SECRET_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "SUPABASE_KEY",
+        "SUPABASE_ANON_KEY",
+    )
     if not url or not key:
         return None
-    return create_client(url, key)
+    return create_client(url.rstrip("/"), key)
 
 
 def hash_password(password: str) -> str:
@@ -75,7 +85,11 @@ def list_users() -> list[dict[str, Any]]:
 def upsert_user(email: str, *, status: str = "approved", password: Optional[str] = None) -> None:
     client = get_client()
     if not client:
-        raise RuntimeError("Supabase is not configured.")
+        raise RuntimeError(
+            "Supabase is not configured. In Streamlit Cloud Secrets set "
+            "SUPABASE_STOCK_URL and SUPABASE_STOCK_SECRET_KEY "
+            "(same values as TechLife), or SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+        )
     email = normalize_email(email)
     if not email or "@" not in email:
         raise ValueError("Invalid email")
@@ -97,7 +111,11 @@ def upsert_user(email: str, *, status: str = "approved", password: Optional[str]
 def set_password(email: str, password: str) -> None:
     client = get_client()
     if not client:
-        raise RuntimeError("Supabase is not configured.")
+        raise RuntimeError(
+            "Supabase is not configured. In Streamlit Cloud Secrets set "
+            "SUPABASE_STOCK_URL and SUPABASE_STOCK_SECRET_KEY "
+            "(same values as TechLife), or SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+        )
     email = normalize_email(email)
     client.table("sbd_users").update(
         {
@@ -110,7 +128,11 @@ def set_password(email: str, password: str) -> None:
 def delete_user(email: str) -> None:
     client = get_client()
     if not client:
-        raise RuntimeError("Supabase is not configured.")
+        raise RuntimeError(
+            "Supabase is not configured. In Streamlit Cloud Secrets set "
+            "SUPABASE_STOCK_URL and SUPABASE_STOCK_SECRET_KEY "
+            "(same values as TechLife), or SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+        )
     email = normalize_email(email)
     client.table("sbd_users").delete().eq("email", email).execute()
 
@@ -146,7 +168,11 @@ def last_logins(email: str, n: int = 5) -> list[str]:
 def create_access_request(email: str, message: str = "") -> None:
     client = get_client()
     if not client:
-        raise RuntimeError("Supabase is not configured.")
+        raise RuntimeError(
+            "Supabase is not configured. In Streamlit Cloud Secrets set "
+            "SUPABASE_STOCK_URL and SUPABASE_STOCK_SECRET_KEY "
+            "(same values as TechLife), or SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+        )
     email = normalize_email(email)
     client.table("sbd_access_requests").insert(
         {"email": email, "message": (message or "").strip(), "status": "pending"}
@@ -198,7 +224,11 @@ def get_admin_emails() -> list[str]:
 def set_admin_emails(raw: str) -> None:
     client = get_client()
     if not client:
-        raise RuntimeError("Supabase is not configured.")
+        raise RuntimeError(
+            "Supabase is not configured. In Streamlit Cloud Secrets set "
+            "SUPABASE_STOCK_URL and SUPABASE_STOCK_SECRET_KEY "
+            "(same values as TechLife), or SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+        )
     cleaned = ",".join(
         normalize_email(p) for p in str(raw).replace(";", ",").split(",") if normalize_email(p)
     )
