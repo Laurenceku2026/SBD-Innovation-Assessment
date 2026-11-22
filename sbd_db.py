@@ -1,0 +1,205 @@
+"""Supabase access for Stanley Black & Decker Innovation Assessment (sbd_* tables)."""
+from __future__ import annotations
+
+import hmac
+import hashlib
+import os
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+import streamlit as st
+from supabase import Client, create_client
+
+DEFAULT_PASSWORD = "1234567"
+PBKDF2_ROUNDS = 120_000
+
+
+def _secret(name: str, default: str = "") -> str:
+    try:
+        val = st.secrets.get(name)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    except Exception:
+        pass
+    return str(default or os.environ.get(name, "")).strip()
+
+
+def get_client() -> Optional[Client]:
+    url = _secret("SUPABASE_URL")
+    key = _secret("SUPABASE_SERVICE_ROLE_KEY") or _secret("SUPABASE_ANON_KEY")
+    if not url or not key:
+        return None
+    return create_client(url, key)
+
+
+def hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ROUNDS)
+    return salt.hex() + "$" + dk.hex()
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        salt_hex, dk_hex = stored.split("$", 1)
+        salt = bytes.fromhex(salt_hex)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ROUNDS)
+        return hmac.compare_digest(dk.hex(), dk_hex)
+    except Exception:
+        return False
+
+
+def normalize_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+
+def get_user(email: str) -> Optional[dict[str, Any]]:
+    client = get_client()
+    if not client:
+        return None
+    email = normalize_email(email)
+    if not email:
+        return None
+    res = client.table("sbd_users").select("*").eq("email", email).limit(1).execute()
+    rows = res.data or []
+    return rows[0] if rows else None
+
+
+def list_users() -> list[dict[str, Any]]:
+    client = get_client()
+    if not client:
+        return []
+    res = client.table("sbd_users").select("*").order("created_at", desc=True).execute()
+    return list(res.data or [])
+
+
+def upsert_user(email: str, *, status: str = "approved", password: Optional[str] = None) -> None:
+    client = get_client()
+    if not client:
+        raise RuntimeError("Supabase is not configured.")
+    email = normalize_email(email)
+    if not email or "@" not in email:
+        raise ValueError("Invalid email")
+    existing = get_user(email)
+    payload: dict[str, Any] = {
+        "email": email,
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if existing is None:
+        payload["password_hash"] = hash_password(password or DEFAULT_PASSWORD)
+        client.table("sbd_users").insert(payload).execute()
+        return
+    if password:
+        payload["password_hash"] = hash_password(password)
+    client.table("sbd_users").update(payload).eq("email", email).execute()
+
+
+def set_password(email: str, password: str) -> None:
+    client = get_client()
+    if not client:
+        raise RuntimeError("Supabase is not configured.")
+    email = normalize_email(email)
+    client.table("sbd_users").update(
+        {
+            "password_hash": hash_password(password),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ).eq("email", email).execute()
+
+
+def delete_user(email: str) -> None:
+    client = get_client()
+    if not client:
+        raise RuntimeError("Supabase is not configured.")
+    email = normalize_email(email)
+    client.table("sbd_users").delete().eq("email", email).execute()
+
+
+def record_login(email: str) -> None:
+    client = get_client()
+    if not client:
+        return
+    email = normalize_email(email)
+    client.table("sbd_login_events").insert({"email": email}).execute()
+
+
+def last_logins(email: str, n: int = 5) -> list[str]:
+    client = get_client()
+    if not client:
+        return []
+    email = normalize_email(email)
+    res = (
+        client.table("sbd_login_events")
+        .select("logged_at")
+        .eq("email", email)
+        .order("logged_at", desc=True)
+        .limit(n)
+        .execute()
+    )
+    out = []
+    for row in res.data or []:
+        ts = row.get("logged_at") or ""
+        out.append(str(ts).replace("T", " ")[:19])
+    return out
+
+
+def create_access_request(email: str, message: str = "") -> None:
+    client = get_client()
+    if not client:
+        raise RuntimeError("Supabase is not configured.")
+    email = normalize_email(email)
+    client.table("sbd_access_requests").insert(
+        {"email": email, "message": (message or "").strip(), "status": "pending"}
+    ).execute()
+
+
+def list_pending_requests() -> list[dict[str, Any]]:
+    client = get_client()
+    if not client:
+        return []
+    res = (
+        client.table("sbd_access_requests")
+        .select("*")
+        .eq("status", "pending")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return list(res.data or [])
+
+
+def set_request_status(request_id: str, status: str) -> None:
+    client = get_client()
+    if not client:
+        return
+    client.table("sbd_access_requests").update({"status": status}).eq("id", request_id).execute()
+
+
+def get_admin_emails() -> list[str]:
+    emails: list[str] = []
+    fallback = _secret("ADMIN_EMAIL") or _secret("SMTP_FROM_EMAIL")
+    if fallback:
+        emails.append(normalize_email(fallback))
+    client = get_client()
+    if client:
+        try:
+            res = client.table("sbd_settings").select("admin_emails").eq("id", 1).limit(1).execute()
+            rows = res.data or []
+            if rows:
+                raw = rows[0].get("admin_emails") or ""
+                for part in str(raw).replace(";", ",").split(","):
+                    e = normalize_email(part)
+                    if e and e not in emails:
+                        emails.append(e)
+        except Exception:
+            pass
+    return emails
+
+
+def set_admin_emails(raw: str) -> None:
+    client = get_client()
+    if not client:
+        raise RuntimeError("Supabase is not configured.")
+    cleaned = ",".join(
+        normalize_email(p) for p in str(raw).replace(";", ",").split(",") if normalize_email(p)
+    )
+    client.table("sbd_settings").upsert({"id": 1, "admin_emails": cleaned}).execute()
