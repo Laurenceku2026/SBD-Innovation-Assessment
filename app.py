@@ -51,7 +51,7 @@ def t() -> dict:
             "password": "密码",
             "login": "登录",
             "apply": "申请开通",
-            "apply_hint": "提交后由管理员审核。开通后初始密码为 1234567，登录后请自行修改。",
+            "apply_hint": "提交后由管理员审核。通过后会发邮件通知您如何登录。",
             "apply_msg": "备注（可选）",
             "apply_ok": "申请已提交，请等待管理员审核。",
             "login_fail": "邮箱或密码不正确，或账号尚未开通。",
@@ -86,6 +86,12 @@ def t() -> dict:
             "logo_too_large": "图片过大，请小于 500KB",
             "logo_invalid_type": "仅支持 PNG、JPG 或 WebP",
             "logo_migration_hint": "请先在 Supabase 执行 sql/sbd_migration_logo.sql",
+            "mail_admin_ok": "已邮件通知管理员。",
+            "mail_admin_fail": "申请已提交，但未能通知管理员：",
+            "mail_no_admin": "请先在管理员后台填写管理员邮箱，并配置 SMTP。",
+            "mail_user_ok": "已邮件通知用户登录密码。",
+            "mail_user_fail": "账号已开通，但发信失败：",
+            "smtp_missing": "邮件未配置。请在 Streamlit Secrets 填写与 TechLife 相同的 SMTP_HOST / SMTP_USER / SMTP_PASSWORD / SMTP_FROM。",
         }
     return {
         "title": "Innovation Assessment  创新评估",
@@ -94,7 +100,7 @@ def t() -> dict:
         "password": "Password",
         "login": "Sign in",
         "apply": "Apply for access",
-        "apply_hint": "An admin will review your request. Initial password is 1234567; change it after you sign in.",
+        "apply_hint": "An admin will review your request. After approval you will receive an email with how to sign in.",
         "apply_msg": "Note (optional)",
         "apply_ok": "Application submitted. Please wait for admin approval.",
         "login_fail": "Wrong email or password, or the account is not approved yet.",
@@ -129,6 +135,12 @@ def t() -> dict:
         "logo_too_large": "Image too large. Max 500KB.",
         "logo_invalid_type": "Only PNG, JPG, or WebP is supported",
         "logo_migration_hint": "Run sql/sbd_migration_logo.sql in Supabase first",
+        "mail_admin_ok": "Admins have been emailed.",
+        "mail_admin_fail": "Application saved, but the admin email failed: ",
+        "mail_no_admin": "Set admin emails in the admin panel and configure SMTP.",
+        "mail_user_ok": "The user was emailed their login password.",
+        "mail_user_fail": "Account approved, but the email failed: ",
+        "smtp_missing": "Email is not configured. In Streamlit Secrets set the same SMTP_HOST / SMTP_USER / SMTP_PASSWORD / SMTP_FROM as TechLife.",
     }
 
 
@@ -265,61 +277,81 @@ def _logout_user() -> None:
 
 
 def smtp_settings() -> dict:
+    user = _secret("SMTP_USER") or _secret("SMTP_USERNAME")
     return {
-        "host": _secret("SMTP_HOST") or _secret("SMTP_SERVER"),
+        "host": _secret("SMTP_HOST") or _secret("SMTP_SERVER") or "smtp.gmail.com",
         "port": int(_secret("SMTP_PORT") or "587"),
-        "user": _secret("SMTP_USER") or _secret("SMTP_USERNAME"),
+        "user": user,
         "password": _secret("SMTP_PASSWORD"),
-        "mail_from": _secret("SMTP_FROM_EMAIL") or _secret("SMTP_USER"),
+        "mail_from": _secret("SMTP_FROM") or _secret("SMTP_FROM_EMAIL") or user,
+        "use_tls": _secret("SMTP_USE_TLS") not in ("0", "false", "False"),
     }
 
 
-def notify_admins_of_request(email: str, message: str) -> None:
+def smtp_ready() -> bool:
     cfg = smtp_settings()
-    if not smtp_configured(host=cfg["host"], user=cfg["user"], password=cfg["password"]):
-        return
-    admins = sbd_db.get_admin_emails()
-    lang = st.session_state.get("lang", "zh")
-    subject = (
-        "SBD 创新评估：新的开通申请"
-        if lang == "zh"
-        else "SBD Innovation Assessment: new access request"
-    )
-    body = f"Email: {email}\n\n{message or ''}"
-    for to_addr in admins:
-        send_email(
-            host=cfg["host"],
-            port=cfg["port"],
-            user=cfg["user"],
-            password=cfg["password"],
-            mail_from=cfg["mail_from"],
-            to_addr=to_addr,
-            subject=subject,
-            text_body=body,
-        )
+    return smtp_configured(host=cfg["host"], user=cfg["user"], password=cfg["password"])
 
 
-def notify_user_approved(email: str) -> None:
+def _send_mail(to_addr: str, subject: str, text_body: str) -> tuple[bool, str]:
     cfg = smtp_settings()
     if not smtp_configured(host=cfg["host"], user=cfg["user"], password=cfg["password"]):
-        return
-    lang = st.session_state.get("lang", "zh")
-    if lang == "zh":
-        subject = "SBD 创新评估账号已开通"
-        body = "您的账号已开通。请用申请邮箱登录，初始密码为 1234567，登录后请立即修改密码。"
-    else:
-        subject = "SBD Innovation Assessment access approved"
-        body = "Your account is approved. Sign in with this email. Initial password is 1234567; please change it after login."
-    send_email(
+        return False, "smtp_not_configured"
+    return send_email(
         host=cfg["host"],
         port=cfg["port"],
         user=cfg["user"],
         password=cfg["password"],
         mail_from=cfg["mail_from"],
-        to_addr=email,
+        to_addr=to_addr,
         subject=subject,
-        text_body=body,
+        text_body=text_body,
+        use_tls=cfg["use_tls"],
     )
+
+
+def notify_admins_of_request(email: str, message: str) -> tuple[bool, str]:
+    admins = sbd_db.get_admin_emails()
+    if not admins:
+        return False, "no_admin_email"
+    if not smtp_ready():
+        return False, "smtp_not_configured"
+    subject = "Innovation Assessment：新的开通申请 / new access request"
+    body = (
+        "A user applied for Innovation Assessment access.\n"
+        "有用户申请开通 Innovation Assessment。\n\n"
+        f"Email: {email}\n"
+        f"Note: {message or '-'}\n\n"
+        "Please open the app, click ⚙️, and approve the request.\n"
+        "请打开应用，点击右上角齿轮，审核该申请。"
+    )
+    errors = []
+    sent = 0
+    for to_addr in admins:
+        ok, err = _send_mail(to_addr, subject, body)
+        if ok:
+            sent += 1
+        else:
+            errors.append(f"{to_addr}: {err}")
+    if sent:
+        return True, ""
+    return False, "; ".join(errors) or "send_failed"
+
+
+def notify_user_approved(email: str) -> tuple[bool, str]:
+    if not smtp_ready():
+        return False, "smtp_not_configured"
+    password = sbd_db.DEFAULT_PASSWORD
+    subject = "Innovation Assessment 账号已开通 / access approved"
+    body = (
+        "Your Innovation Assessment account is approved.\n"
+        "您的 Innovation Assessment 账号已开通。\n\n"
+        f"Email / 登录邮箱: {email}\n"
+        f"Password / 登录密码: {password}\n\n"
+        "Please sign in and change your password.\n"
+        "请登录后立即修改密码。"
+    )
+    return _send_mail(email, subject, body)
 
 
 def render_top_brand() -> None:
@@ -431,10 +463,19 @@ def render_logo_section() -> None:
 
 def render_admin_panel() -> None:
     labels = t()
+    flash = st.session_state.pop("sbd_flash", None)
+    if flash:
+        kind, msg = flash
+        if kind == "ok":
+            st.success(msg)
+        else:
+            st.error(msg)
     st.markdown(f"## {labels['admin_panel']}")
     if st.button(labels["logout"]):
         st.session_state.sbd_admin = False
         st.rerun()
+    if not smtp_ready():
+        st.warning(labels["smtp_missing"])
     render_logo_section()
 
     st.markdown(f"### {labels['admin_emails']}")
@@ -453,9 +494,14 @@ def render_admin_panel() -> None:
         with c2:
             if st.button(labels["approve"], key=f"appr_{req.get('id')}"):
                 email = req.get("email") or ""
-                sbd_db.upsert_user(email, status="approved")
+                sbd_db.upsert_user(email, status="approved", password=sbd_db.DEFAULT_PASSWORD)
                 sbd_db.set_request_status(req["id"], "approved")
-                notify_user_approved(email)
+                ok, err = notify_user_approved(email)
+                st.session_state.sbd_flash = (
+                    ("ok", labels["mail_user_ok"])
+                    if ok
+                    else ("err", labels["mail_user_fail"] + str(err))
+                )
                 st.rerun()
         with c3:
             if st.button(labels["reject"], key=f"rej_{req.get('id')}"):
@@ -467,8 +513,13 @@ def render_admin_panel() -> None:
         new_email = st.text_input(labels["email"])
         submitted = st.form_submit_button(labels["add_user"])
         if submitted and new_email:
-            sbd_db.upsert_user(new_email, status="approved")
-            st.success(new_email)
+            sbd_db.upsert_user(new_email, status="approved", password=sbd_db.DEFAULT_PASSWORD)
+            ok, err = notify_user_approved(sbd_db.normalize_email(new_email))
+            st.session_state.sbd_flash = (
+                ("ok", f"{new_email} — {labels['mail_user_ok']}")
+                if ok
+                else ("err", f"{new_email} — {labels['mail_user_fail']}{err}")
+            )
             st.rerun()
 
     st.markdown(f"### {labels['users']}")
@@ -530,8 +581,14 @@ def render_user_gate() -> None:
                         if not existing:
                             sbd_db.upsert_user(email_n, status="pending")
                         sbd_db.create_access_request(email_n, apply_msg)
-                        notify_admins_of_request(email_n, apply_msg)
+                        ok, err = notify_admins_of_request(email_n, apply_msg)
                         st.success(labels["apply_ok"])
+                        if ok:
+                            st.info(labels["mail_admin_ok"])
+                        elif err == "no_admin_email":
+                            st.warning(labels["mail_no_admin"])
+                        else:
+                            st.warning(labels["mail_admin_fail"] + str(err))
 
 
 def _handle_assessment_side_effects() -> None:

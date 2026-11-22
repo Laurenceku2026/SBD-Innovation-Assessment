@@ -206,7 +206,7 @@ def set_request_status(request_id: str, status: str) -> None:
 
 def get_admin_emails() -> list[str]:
     emails: list[str] = []
-    fallback = _secret("ADMIN_EMAIL") or _secret("SMTP_FROM_EMAIL")
+    fallback = _secret("ADMIN_EMAIL") or _secret("SMTP_FROM") or _secret("SMTP_FROM_EMAIL") or _secret("SMTP_USER")
     if fallback:
         emails.append(normalize_email(fallback))
     client = get_client()
