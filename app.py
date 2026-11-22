@@ -45,7 +45,7 @@ def t() -> dict:
     zh = st.session_state.get("lang", "zh") == "zh"
     if zh:
         return {
-            "title": "Stanley Black & Decker 创新评估",
+            "title": "Innovation Assessment  创新评估",
             "subtitle": "请使用已开通的邮箱登录。新用户请先申请开通。",
             "email": "邮箱",
             "password": "密码",
@@ -88,7 +88,7 @@ def t() -> dict:
             "logo_migration_hint": "请先在 Supabase 执行 sql/sbd_migration_logo.sql",
         }
     return {
-        "title": "Stanley Black & Decker Innovation Assessment",
+        "title": "Innovation Assessment  创新评估",
         "subtitle": "Sign in with an approved email. New users should apply first.",
         "email": "Email",
         "password": "Password",
@@ -322,6 +322,15 @@ def notify_user_approved(email: str) -> None:
     )
 
 
+def render_top_brand() -> None:
+    apply_branding()
+    logo_url = st.session_state.get("organization_logo_url") or None
+    st.markdown(
+        enterprise_brand_markup(sbd_db.ORG_NAME, logo_url, variant="main"),
+        unsafe_allow_html=True,
+    )
+
+
 def render_top_buttons(*, show_gear: bool) -> None:
     labels = t()
     col1, col2, col3, col4, col5 = st.columns([8, 1.2, 1.2, 1.2, 1])
@@ -422,15 +431,6 @@ def render_logo_section() -> None:
 
 def render_admin_panel() -> None:
     labels = t()
-    apply_branding()
-    st.markdown(
-        enterprise_brand_markup(
-            sbd_db.ORG_NAME,
-            st.session_state.get("organization_logo_url") or None,
-            variant="main_compact",
-        ),
-        unsafe_allow_html=True,
-    )
     st.markdown(f"## {labels['admin_panel']}")
     if st.button(labels["logout"]):
         st.session_state.sbd_admin = False
@@ -492,13 +492,6 @@ def render_user_gate() -> None:
     labels = t()
     col1, col2, col3 = st.columns([1, 3, 1])
     with col2:
-        apply_branding()
-        logo_url = st.session_state.get("organization_logo_url") or ""
-        if logo_url:
-            st.markdown(
-                enterprise_brand_markup(sbd_db.ORG_NAME, logo_url, variant="main"),
-                unsafe_allow_html=True,
-            )
         st.markdown(f"<h1 style='text-align:center;'>{labels['title']}</h1>", unsafe_allow_html=True)
         st.markdown(f"<p style='text-align:center;color:gray;'>{labels['subtitle']}</p>", unsafe_allow_html=True)
         with st.form("sbd_login_form", border=True):
@@ -565,16 +558,19 @@ def main() -> None:
     set_app_language(st.session_state.lang)
 
     if st.session_state.sbd_admin:
+        render_top_brand()
         render_top_buttons(show_gear=False)
         render_admin_panel()
         return
 
     if st.session_state.show_admin_login:
+        render_top_brand()
         render_top_buttons(show_gear=False)
         render_admin_login()
         return
 
     if not st.session_state.sbd_authenticated:
+        render_top_brand()
         render_top_buttons(show_gear=True)
         render_user_gate()
         return
