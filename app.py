@@ -19,6 +19,7 @@ st.set_page_config(page_title="SBD Innovation Assessment", page_icon="🔹", lay
 
 REMEMBER_DAYS = 30
 TOKEN_QUERY = "sbd"
+DEFAULT_PUBLIC_URL = "https://sbd-innovation.streamlit.app"
 
 
 def _secret(name: str, default: str = "") -> str:
@@ -332,17 +333,10 @@ def _send_mail(
 
 
 def app_base_url() -> str:
-    configured = _secret("APP_BASE_URL") or _secret("SBD_APP_URL")
-    if configured:
-        return configured.rstrip("/")
-    try:
-        host = (st.context.headers.get("Host") or "").strip()
-        proto = (st.context.headers.get("X-Forwarded-Proto") or "https").strip()
-        if host:
-            return f"{proto}://{host}"
-    except Exception:
-        pass
-    return ""
+    configured = (_secret("SBD_APP_URL") or _secret("APP_BASE_URL")).rstrip("/")
+    if configured and "techlife-app.streamlit.app" not in configured:
+        return configured
+    return DEFAULT_PUBLIC_URL
 
 
 def _qp(name: str) -> str:
@@ -401,7 +395,7 @@ def notify_admins_of_request(email: str, message: str, request_id: str) -> tuple
     else:
         link_text = (
             "Please open the app, click ⚙️, and approve the request.\n"
-            "请打开应用，点击右上角齿轮审核。请在 Secrets 填写 APP_BASE_URL 以便邮件内直接 Approve。\n"
+            "请打开应用，点击右上角齿轮审核。\n"
         )
         html_body = ""
     body = (
