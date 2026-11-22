@@ -29,8 +29,12 @@ create table if not exists public.sbd_access_requests (
 
 create table if not exists public.sbd_settings (
   id int primary key default 1,
-  admin_emails text not null default ''
+  admin_emails text not null default '',
+  logo_url text
 );
+
+alter table public.sbd_settings
+  add column if not exists logo_url text;
 
 insert into public.sbd_settings (id, admin_emails)
 values (1, '')

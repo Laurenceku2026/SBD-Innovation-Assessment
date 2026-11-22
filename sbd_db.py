@@ -1,6 +1,7 @@
 """Supabase access for Stanley Black & Decker Innovation Assessment (sbd_* tables)."""
 from __future__ import annotations
 
+import base64
 import hmac
 import hashlib
 import os
@@ -12,6 +13,9 @@ from supabase import Client, create_client
 
 DEFAULT_PASSWORD = "1234567"
 PBKDF2_ROUNDS = 120_000
+LOGO_MAX_BYTES = 500_000
+LOGO_ALLOWED_TYPES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
+ORG_NAME = "Stanley Black & Decker"
 
 
 def _secret(*names: str, default: str = "") -> str:
@@ -233,3 +237,87 @@ def set_admin_emails(raw: str) -> None:
         normalize_email(p) for p in str(raw).replace(";", ",").split(",") if normalize_email(p)
     )
     client.table("sbd_settings").upsert({"id": 1, "admin_emails": cleaned}).execute()
+
+
+def get_settings() -> dict[str, Any]:
+    client = get_client()
+    if not client:
+        return {}
+    try:
+        res = client.table("sbd_settings").select("*").eq("id", 1).limit(1).execute()
+        rows = res.data or []
+        return dict(rows[0]) if rows else {}
+    except Exception:
+        return {}
+
+
+def _portal_sbd_logo() -> str:
+    """Reuse the logo already uploaded on the TechLife SBD organization, if any."""
+    client = get_client()
+    if not client:
+        return ""
+    try:
+        res = (
+            client.table("organizations")
+            .select("logo_url,name,name_zh,name_en")
+            .execute()
+        )
+    except Exception:
+        return ""
+    for row in res.data or []:
+        blob = " ".join(
+            str(row.get(k) or "") for k in ("name", "name_zh", "name_en")
+        ).lower()
+        if "stanley" in blob or "black & decker" in blob or "black and decker" in blob:
+            return str(row.get("logo_url") or "").strip()
+    return ""
+
+
+def get_logo_url() -> str:
+    settings = get_settings()
+    if "logo_url" not in settings:
+        return _portal_sbd_logo()
+    stored = settings.get("logo_url")
+    if stored is None:
+        return _portal_sbd_logo()
+    text = str(stored).strip()
+    return text
+
+
+def set_logo(file_bytes: bytes, content_type: str) -> tuple[bool, str]:
+    client = get_client()
+    if not client:
+        return False, "not_configured"
+    if not file_bytes:
+        return False, "empty_file"
+    if len(file_bytes) > LOGO_MAX_BYTES:
+        return False, "too_large"
+    normalized_type = (content_type or "").lower()
+    if normalized_type == "image/jpg":
+        normalized_type = "image/jpeg"
+    if normalized_type not in LOGO_ALLOWED_TYPES:
+        return False, "invalid_type"
+    encoded = base64.b64encode(file_bytes).decode("ascii")
+    data_url = f"data:{normalized_type};base64,{encoded}"
+    try:
+        client.table("sbd_settings").upsert({"id": 1, "logo_url": data_url}).execute()
+        return True, ""
+    except Exception as exc:
+        detail = str(exc)
+        if "logo_url" in detail and "column" in detail.lower():
+            return False, "missing_column"
+        return False, detail or "update_failed"
+
+
+def clear_logo() -> tuple[bool, str]:
+    client = get_client()
+    if not client:
+        return False, "not_configured"
+    try:
+        client.table("sbd_settings").upsert({"id": 1, "logo_url": ""}).execute()
+        return True, ""
+    except Exception as exc:
+        detail = str(exc)
+        if "logo_url" in detail and "column" in detail.lower():
+            return False, "missing_column"
+        return False, detail or "update_failed"

@@ -10,7 +10,7 @@ import streamlit.components.v1 as components
 
 from assessment import render_innovation_app, set_app_language
 from email_smtp import send_email, smtp_configured
-from portal_enterprise_ui import ensure_enterprise_session_defaults
+from portal_enterprise_ui import ensure_enterprise_session_defaults, enterprise_brand_markup
 import sbd_db
 
 st.set_page_config(page_title="SBD Innovation Assessment", page_icon="🔹", layout="wide")
@@ -77,6 +77,15 @@ def t() -> dict:
             "logout": "退出管理员",
             "last5": "最近 5 次登录",
             "none": "无",
+            "org_logo": "企业 Logo",
+            "upload_logo": "上传 Logo（PNG/JPG/WebP，不超过 500KB）",
+            "save_logo": "保存 Logo",
+            "remove_logo": "删除 Logo",
+            "logo_saved": "Logo 已更新",
+            "logo_removed": "Logo 已删除",
+            "logo_too_large": "图片过大，请小于 500KB",
+            "logo_invalid_type": "仅支持 PNG、JPG 或 WebP",
+            "logo_migration_hint": "请先在 Supabase 执行 sql/sbd_migration_logo.sql",
         }
     return {
         "title": "Stanley Black & Decker Innovation Assessment",
@@ -111,6 +120,15 @@ def t() -> dict:
         "logout": "Leave admin",
         "last5": "Last 5 logins",
         "none": "None",
+        "org_logo": "Organization Logo",
+        "upload_logo": "Upload logo (PNG/JPG/WebP, max 500KB)",
+        "save_logo": "Save Logo",
+        "remove_logo": "Remove Logo",
+        "logo_saved": "Logo updated",
+        "logo_removed": "Logo removed",
+        "logo_too_large": "Image too large. Max 500KB.",
+        "logo_invalid_type": "Only PNG, JPG, or WebP is supported",
+        "logo_migration_hint": "Run sql/sbd_migration_logo.sql in Supabase first",
     }
 
 
@@ -224,11 +242,8 @@ def _enter_user(email: str, *, record: bool, persist: bool) -> None:
     st.session_state.user_email = email
     st.session_state.username = email.split("@")[0] if "@" in email else email
     st.session_state.user_id = email
-    st.session_state.organization_id = "sbd"
-    st.session_state.organization_name = "Stanley Black & Decker"
-    st.session_state.organization_name_zh = "Stanley Black & Decker"
-    st.session_state.organization_name_en = "Stanley Black & Decker"
     st.session_state.show_admin_login = False
+    apply_branding()
     if persist:
         _persist_token(_issue_token(email))
     if record:
@@ -346,12 +361,81 @@ def render_admin_login() -> None:
             st.rerun()
 
 
+def apply_branding() -> None:
+    st.session_state.organization_id = "sbd"
+    st.session_state.organization_name = sbd_db.ORG_NAME
+    st.session_state.organization_name_zh = sbd_db.ORG_NAME
+    st.session_state.organization_name_en = sbd_db.ORG_NAME
+    st.session_state.organization_logo_url = sbd_db.get_logo_url()
+    st.session_state._enterprise_branding_loaded = True
+
+
+def _handle_logo_upload_result(ok: bool, reason: str) -> None:
+    labels = t()
+    if ok:
+        apply_branding()
+        st.success(labels["logo_saved"])
+        st.rerun()
+    elif reason == "too_large":
+        st.error(labels["logo_too_large"])
+    elif reason == "invalid_type":
+        st.error(labels["logo_invalid_type"])
+    elif reason == "missing_column":
+        st.error(labels["logo_migration_hint"])
+    elif reason == "empty_file":
+        st.warning(labels["upload_logo"])
+    else:
+        st.error(reason or labels["logo_invalid_type"])
+
+
+def render_logo_section() -> None:
+    labels = t()
+    logo_url = sbd_db.get_logo_url()
+    st.markdown(f"### {labels['org_logo']}")
+    if logo_url:
+        st.image(logo_url, width=140)
+    uploaded = st.file_uploader(
+        labels["upload_logo"],
+        type=["png", "jpg", "jpeg", "webp"],
+        key="sbd_admin_logo_uploader",
+    )
+    col_save, col_remove = st.columns(2)
+    with col_save:
+        if st.button(labels["save_logo"], key="sbd_admin_save_logo", use_container_width=True, type="primary"):
+            if not uploaded:
+                st.warning(labels["upload_logo"])
+            else:
+                ok, reason = sbd_db.set_logo(uploaded.getvalue(), uploaded.type or "")
+                _handle_logo_upload_result(ok, reason)
+    with col_remove:
+        if logo_url and st.button(labels["remove_logo"], key="sbd_admin_remove_logo", use_container_width=True):
+            ok, reason = sbd_db.clear_logo()
+            if ok:
+                apply_branding()
+                st.success(labels["logo_removed"])
+                st.rerun()
+            elif reason == "missing_column":
+                st.error(labels["logo_migration_hint"])
+            else:
+                st.error(reason or labels["logo_invalid_type"])
+
+
 def render_admin_panel() -> None:
     labels = t()
+    apply_branding()
+    st.markdown(
+        enterprise_brand_markup(
+            sbd_db.ORG_NAME,
+            st.session_state.get("organization_logo_url") or None,
+            variant="main_compact",
+        ),
+        unsafe_allow_html=True,
+    )
     st.markdown(f"## {labels['admin_panel']}")
     if st.button(labels["logout"]):
         st.session_state.sbd_admin = False
         st.rerun()
+    render_logo_section()
 
     st.markdown(f"### {labels['admin_emails']}")
     current = ",".join(sbd_db.get_admin_emails())
@@ -408,6 +492,13 @@ def render_user_gate() -> None:
     labels = t()
     col1, col2, col3 = st.columns([1, 3, 1])
     with col2:
+        apply_branding()
+        logo_url = st.session_state.get("organization_logo_url") or ""
+        if logo_url:
+            st.markdown(
+                enterprise_brand_markup(sbd_db.ORG_NAME, logo_url, variant="main"),
+                unsafe_allow_html=True,
+            )
         st.markdown(f"<h1 style='text-align:center;'>{labels['title']}</h1>", unsafe_allow_html=True)
         st.markdown(f"<p style='text-align:center;color:gray;'>{labels['subtitle']}</p>", unsafe_allow_html=True)
         with st.form("sbd_login_form", border=True):
@@ -489,6 +580,7 @@ def main() -> None:
         return
 
     _handle_assessment_side_effects()
+    apply_branding()
     render_top_buttons(show_gear=True)
     render_innovation_app(embedded=False)
 
